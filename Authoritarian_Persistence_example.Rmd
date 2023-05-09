@@ -1,0 +1,19 @@
+---
+title: "MENA Exceptionalism and BART"
+author: "Daniel K Baissa"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+In this example I will use BART to predict coups (not the DV) globally and use it to explain my logic for looking at MENA exceptionalism
+
+```{r}
+# Merging the data
+
+```
+
