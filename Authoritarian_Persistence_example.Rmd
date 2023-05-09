@@ -7,13 +7,95 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(tidyverse)
 ```
 
 In this example I will use BART to predict coups (not the DV) globally and use it to explain my logic for looking at MENA exceptionalism
 
-```{r}
-# Merging the data
+I will start by loading the libraries and setting up bartMachine
 
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(rJava)
+
+options(java.parameters = "-Xmx5g")     
+library(bartMachine)
+set_bart_machine_num_cores(5)
 ```
+
+
+This is just a subset of data for illustrative perpouses and speed on my laptop.
+
+I will set up the data for BARTmachine
+
+https://statisticsglobe.com/convert-factor-to-dummy-variables-in-r
+```{r message=FALSE, warning=FALSE}
+df <- read_csv("Data/Vdem_Banks.csv") |> 
+  select(!c(suvival_time, coup_number, id, ...1))
+
+dummy_vars <- df |> 
+  select(country_name, year, Region) |> 
+  pivot_wider(names_from = Region,
+              names_prefix = "Region_",
+              # values_fill = 0,
+              values_from = Region
+              )
+
+dummy_vars |> 
+  mutate(Region_8 = unlist(Region_8))
+
+unlist(dummy_vars$Region_8)
+
+X <- df |> 
+
+y <- as.factor(X$e_pt_coup)
+
+X$e_pt_coup <- NULL
+
+y <- relevel(y, "1")
+
+X <- as.data.frame(X)
+```
+
+Here are the variables on the right hand side of this model:
+
+```{r paged.print=TRUE}
+# Convert column names to a table for ease of reading
+col_table <- matrix(colnames(X), ncol = 2, byrow = TRUE)
+
+# Print the table
+col_table
+```
+
+
+Now let's run a basic BART model. The data are extremely sparce so I will set prob_rule_class = .1 to compensate. This can be validated by looking at the confusion matrix to make sure the model has a good fit.
+
+```{r message=FALSE, warning=FALSE}
+bm <- bartMachine(y = y, X = X, prob_rule_class = .1)
+```
+
+```{r}
+bm
+```
+
+Here we see that the model accurately classifies `r (1 - bm[["confusion_matrix"]][["model errors"]][2]) *100`\% of non-coups and `r (1-bm[["confusion_matrix"]][["model errors"]][1]) *100`\% of coups with an overall accuracy rate of `r (1)-bm[["confusion_matrix"]][["model errors"]][3]) *100`\%
+
+
+## PD Plot
+
+Region 3 is for the MENA
+
+```{r}
+pd_plot(bm,  "Region_3")
+```
+
+
+```{r}
+bm[["training_data_features"]]
+```
+
+```{r}
+X |> 
+  filter(country_name == "Tunisia")
+```
+
 
