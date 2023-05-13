@@ -17,9 +17,9 @@ I will start by loading the libraries and setting up bartMachine
 library(tidyverse)
 library(rJava)
 
-options(java.parameters = "-Xmx5g")     
+options(java.parameters = "-Xmx50g")     
 library(bartMachine)
-set_bart_machine_num_cores(5)
+set_bart_machine_num_cores(30)
 ```
 
 
@@ -30,22 +30,20 @@ I will set up the data for BARTmachine
 https://statisticsglobe.com/convert-factor-to-dummy-variables-in-r
 ```{r message=FALSE, warning=FALSE}
 df <- read_csv("Data/Vdem_Banks.csv") |> 
-  select(!c(suvival_time, coup_number, id, ...1))
+  select(!c(suvival_time, coup_number, id, ...1)) |> 
+  mutate(Region = as.factor(Region)) |> 
+  filter(country_name != "Israel") # Removing Israel because its an outlier in the MENA
 
-dummy_vars <- df |> 
-  select(country_name, year, Region) |> 
-  pivot_wider(names_from = Region,
-              names_prefix = "Region_",
-              # values_fill = 0,
-              values_from = Region
-              )
 
-dummy_vars |> 
-  mutate(Region_8 = unlist(Region_8))
 
-unlist(dummy_vars$Region_8)
+
+
+df <- data.frame(df[ , ! colnames(df) %in% "Region"],       # Create dummy data
+                         model.matrix( ~ (Region) - 1, df) )
+
 
 X <- df |> 
+  na.omit()
 
 y <- as.factor(X$e_pt_coup)
 
@@ -77,7 +75,34 @@ bm <- bartMachine(y = y, X = X, prob_rule_class = .1)
 bm
 ```
 
-Here we see that the model accurately classifies `r (1 - bm[["confusion_matrix"]][["model errors"]][2]) *100`\% of non-coups and `r (1-bm[["confusion_matrix"]][["model errors"]][1]) *100`\% of coups with an overall accuracy rate of `r (1)-bm[["confusion_matrix"]][["model errors"]][3]) *100`\%
+Here we see that the model accurately classifies `r (1 - bm[["confusion_matrix"]][["model errors"]][2]) *100`\% of non-coups and `r (1-bm[["confusion_matrix"]][["model errors"]][1]) *100`\% of coups with an overall accuracy rate of `r (1-bm[["confusion_matrix"]][["model errors"]][3]) *100`\%
+
+
+## Variable Selection
+
+Note that there are `r length(bm$training_data_features)` variables in the final model. Let's select a smaller number of variables to allow for an easier comparison to see how Region might differ.
+
+```{r}
+vs <-  var_selection_by_permute(bm, plot  = FALSE)
+
+```
+
+Now we will use local names to select the following `r vs$important_vars_local_names` as variables
+
+
+```{r}
+X2 <- df |> 
+  select(c(Region3, e_pt_coup, vs$important_vars_local_names)) |> 
+  na.omit()
+
+y2 <- X2$e_pt_coup
+
+X2$e_pt_coup <- NULL
+
+
+bm2 <- bartMachine(y = y2, X = X2, prob_rule_class = .1)
+
+```
 
 
 ## PD Plot
@@ -85,17 +110,114 @@ Here we see that the model accurately classifies `r (1 - bm[["confusion_matrix"]
 Region 3 is for the MENA
 
 ```{r}
-pd_plot(bm,  "Region_3")
+
+pd_plot(bm2,  "Region3")
 ```
+
+Here we find that the MENA region is about the same with respect to coup chance as any other region.
+
+```{r}
+for (i in 1:length(bm2$training_data_features)) {
+  pd_plot(bm2,  bm2$training_data_features[i])
+
+}
+
+
+```
+
+Here we can see that Party Competition has a U shaped Function. Democracy is negativly associated with coups, Infant mortality is poitivly assoicated with coups, and political polarization is moderatly associated with coups at the extremel levels. 
+
+## Within the MENA
+
+Now let's look at the results within the MENA... This unfortunately would be like what we did before, because we want to know about variation within the region. Hariri used a 2 stage model to say that MENA is unique. I am not aware of such a BART model today. But I am not sure what he did made sense anyways.
+
+
+### Countries in the MENA dataset
+
+```{r}
+df |> 
+  filter(Region3 == 1) |> 
+  select(country_name) |> 
+  unique()
+
+
+```
+
+### Stage 1
+
+Stage 1 would be something like starting by predicting the MENA region. Technically that would be finding everything that is related to being in the MENA region. 
+
 
 
 ```{r}
-bm[["training_data_features"]]
+X3 <- df |> 
+  select(-c("Region1", 
+            "Region2",
+            "Region4",
+            "Region5",
+            "Region6",
+            "Region7",
+            "Region8",
+            "Region9",
+            "Region10",
+            "country_name")) |> 
+  na.omit()
+
+y3 <- as.factor(X3$Region3)
+y3 <- relevel(y3, "1")
+
+X3$Region3 <- NULL
+
+bm3 <- bartMachine(y = y3, X = X3, prob_rule_class = .5)
+
+bm3
 ```
+
+This model was extremely effetive at predicting MENA countries.
+
+
+### Predictors of the MENA
+
+Now what variables predict being in the MENA?
 
 ```{r}
-X |> 
-  filter(country_name == "Tunisia")
+vs <-  var_selection_by_permute(bm3, plot  = FALSE)
+
 ```
 
+The following variables predict being a MENA country`r vs$important_vars_local_names`
+
+
+### Effect of Predictors of MENA
+
+Now let's see how those predictors determine impact the MENA region
+
+
+```{r}
+
+X4 <- df |> 
+  select(c(Region3, vs$important_vars_local_names)) |> 
+  na.omit()
+
+y4 <- as.factor(X4$Region3)
+y4 <- relevel(y4, "1")
+
+X4$Region3 <- NULL
+
+bm4 <- bartMachine(y = y4, X = X4, prob_rule_class = .5)
+
+bm4
+
+
+
+
+
+for (i in 1:length(bm4$training_data_features)) {
+  pd_plot(bm4,  bm4$training_data_features[i])
+
+}
+```
+
+
+This findings indicate that the MENA countries have lower party competition across their regions in their countries, Higher GDP Per Capitas, though not the highest. Produce more oil per capita, and are more likely to have their HOG propose legislation in practice (v2exdfpphg) though that may not be signficant. Oddly, it looks like V-dem also codes the MENA countries as having fewer barriers to political parties? 
 
